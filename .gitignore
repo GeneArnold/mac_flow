@@ -1,0 +1,16 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+# SQLite history is personal data — not committed
+history.db
+history.db-journal
+# macOS
+.DS_Store
+# IDE
+.vscode/
+.idea/
+# Claude Code session files
+.claude/

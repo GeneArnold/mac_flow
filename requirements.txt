@@ -1,0 +1,16 @@
+# Core — API + audio
+groq>=1.1.0
+sounddevice>=0.4.6
+numpy>=1.26.0
+
+# Hotkey + menubar
+pynput>=1.8.0
+rumps>=0.4.0
+
+# Config writer (optional but recommended)
+tomli_w>=1.0.0
+
+# macOS AppKit / Quartz bindings (for pasteboard + synthetic Cmd+V)
+pyobjc-core>=10.0
+pyobjc-framework-Cocoa>=10.0
+pyobjc-framework-Quartz>=10.0

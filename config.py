@@ -6,9 +6,15 @@ _DEFAULTS covers every key so the app starts safely without it.
 Key design decisions:
 - _deep_merge lets the on-disk file override only the keys it declares;
   missing keys fall back to defaults automatically.
-- GROQ_API_KEY lives exclusively in .env / environment — never in the toml.
+- API keys live exclusively in .env / environment — never in the TOML. They
+  are surfaced on the loaded config dict under cfg["keys"][ENV_NAME].
+- Providers are switchable. Transcription is either local mlx-whisper or the
+  Groq Whisper API; enhancement is any OpenAI-compatible chat endpoint
+  (Ollama locally, or DeepSeek / OpenRouter / Groq in the cloud). The
+  connection details for each enhancement provider live in ENHANCE_PROVIDERS
+  so the TOML only has to name a provider, not repeat base URLs.
 - tomli_w (optional) writes proper TOML. If absent, the manual fallback
-  writer handles simple nested dicts (all we need).
+  writer handles our flat two-level sections.
 
 When adding new settings, add them to _DEFAULTS first so old configs
 without that key still work.
@@ -19,6 +25,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+import paths
+
 try:
     import tomli_w
 
@@ -26,25 +34,68 @@ try:
 except ImportError:
     _HAS_TOMLI_W = False
 
-CONFIG_PATH = Path(__file__).parent / "mac_flow.toml"
-ENV_PATH = Path(__file__).parent / ".env"
+CONFIG_PATH = paths.data_dir() / "mac_flow.toml"
+ENV_PATH = paths.data_dir() / ".env"
+
+# Enhancement backends — all OpenAI-compatible chat APIs, so a single
+# OpenAI-SDK client (see core/enhancer.py) drives every one of them. Only the
+# base_url, the .env var holding the key, and a default model differ.
+# Ollama runs locally and needs no real key (the SDK still wants a non-empty
+# string, which the engine supplies). api_key_env=None marks a keyless local
+# provider.
+ENHANCE_PROVIDERS = {
+    "ollama": {
+        "base_url": "http://localhost:11434/v1",
+        "api_key_env": None,
+        "model": "qwen2.5:7b",
+    },
+    "deepseek": {
+        "base_url": "https://api.deepseek.com",
+        "api_key_env": "DEEPSEEK_API_KEY",
+        "model": "deepseek-v4-flash",
+    },
+    "openrouter": {
+        "base_url": "https://openrouter.ai/api/v1",
+        "api_key_env": "OPENROUTER_API_KEY",
+        "model": "meta-llama/llama-3.3-70b-instruct",
+    },
+    "groq": {
+        "base_url": "https://api.groq.com/openai/v1",
+        "api_key_env": "GROQ_API_KEY",
+        "model": "llama-3.3-70b-versatile",
+    },
+}
+
+# Every .env var the app knows how to read/write. Keys are stored in .env
+# (gitignored), never in the TOML, and surfaced as cfg["keys"][NAME].
+_KEY_ENV_VARS = ("GROQ_API_KEY", "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY")
 
 # Default values for every setting. The on-disk TOML is merged on top of these,
 # so any missing key silently falls back to the default here.
 #
-# Default hotkey is Option+Space — matches Wispr Flow's default and avoids
-# collisions with Spotlight (Cmd+Space) and input-source switching on Mac.
+# Default hotkey is Option+Shift+Space — unclaimed by any common macOS app
+# or utility. Avoids collisions with Spotlight (Cmd+Space), macOS
+# input-source switching (Ctrl+Space), Raycast (Option+Space), and
+# Sublime Text's Auto Complete (Ctrl+Space). See NOTES.md Session 4
+# continuation for the full hotkey-collision history.
 _DEFAULTS = {
     "app": {"version": "0.1.0", "autostart": False},
     "audio": {"device_index": -1, "sample_rate": 16000, "channels": 1},
-    "hotkey": {"modifiers": ["alt"], "key": "space"},
-    "groq": {
-        "whisper_model": "whisper-large-v3",
-        "llm_model": "llama-3.3-70b-versatile",
+    "hotkey": {"modifiers": ["alt", "shift"], "key": "space"},
+    # Transcription: "mlx" runs Whisper locally (no key, offline); "groq"
+    # uses the Groq Whisper API (needs GROQ_API_KEY). The *_model keys let
+    # each backend keep its own model string so switching back is lossless.
+    "transcription": {
+        "provider": "mlx",
+        "mlx_model": "mlx-community/whisper-large-v3-turbo",
+        "groq_model": "whisper-large-v3",
     },
-    "enhancement": {"mode": "clean"},
-    "output": {"auto_paste": True, "save_history": True},
-    "ui": {"notify_on_result": True},
+    # Enhancement: mode is what to do (raw/clean/rewrite); provider is who
+    # does it (see ENHANCE_PROVIDERS). model="" means "use the provider's
+    # default model" from the registry.
+    "enhancement": {"mode": "clean", "provider": "ollama", "model": ""},
+    "output": {"auto_paste": True, "auto_clipboard": True, "save_history": True},
+    "ui": {"notify_on_result": False},
 }
 
 
@@ -77,8 +128,8 @@ def _load_env() -> None:
 def load() -> dict:
     """Load config from disk merged with defaults. Safe to call repeatedly.
 
-    API key is resolved from .env / GROQ_API_KEY env var only — it is
-    never stored in mac_flow.toml.
+    API keys are resolved from .env / environment only (never the TOML) and
+    attached under cfg["keys"][ENV_NAME].
     """
     _load_env()
     cfg = _deep_merge({}, _DEFAULTS)
@@ -86,15 +137,15 @@ def load() -> dict:
         with open(CONFIG_PATH, "rb") as f:
             on_disk = tomllib.load(f)
         cfg = _deep_merge(cfg, on_disk)
-    cfg["groq"]["api_key"] = os.environ.get("GROQ_API_KEY", "")
+    cfg["keys"] = {name: os.environ.get(name, "") for name in _KEY_ENV_VARS}
     return cfg
 
 
 def save(cfg: dict) -> None:
     """Write the full config dict to disk as TOML."""
-    # Never persist api_key to the TOML — it lives in .env only
+    # Never persist resolved API keys to the TOML — they live in .env only.
     cfg = _deep_merge({}, cfg)
-    cfg.get("groq", {}).pop("api_key", None)
+    cfg.pop("keys", None)
 
     if _HAS_TOMLI_W:
         with open(CONFIG_PATH, "wb") as f:
@@ -119,18 +170,18 @@ def save(cfg: dict) -> None:
 
 
 def set_value(section: str, key: str, value: Any) -> None:
-    """Update a single key in a section and save.
-
-    Special case: groq.api_key is written to .env (gitignored) rather than
-    mac_flow.toml so it can never accidentally be committed to git.
-    """
-    if section == "groq" and key == "api_key":
-        _save_env_key("GROQ_API_KEY", value)
-        os.environ["GROQ_API_KEY"] = value
-        return
+    """Update a single key in a section and save to the TOML."""
     cfg = load()
     cfg[section][key] = value
     save(cfg)
+
+
+def set_api_key(env_name: str, value: str) -> None:
+    """Store an API key in .env (gitignored) rather than the TOML, so it can
+    never accidentally be committed to git or shared over the network.
+    """
+    _save_env_key(env_name, value)
+    os.environ[env_name] = value
 
 
 def _save_env_key(env_key: str, value: str) -> None:

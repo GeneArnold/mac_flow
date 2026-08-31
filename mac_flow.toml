@@ -3,24 +3,31 @@ version = "0.1.0"
 autostart = false
 
 [audio]
-device_index = -1
+device_index = 2
 sample_rate = 16000
 channels = 1
 
 [hotkey]
-modifiers = ["alt"]
+modifiers = [
+    "alt",
+    "shift",
+]
 key = "space"
 
-[groq]
-whisper_model = "whisper-large-v3"
-llm_model = "llama-3.3-70b-versatile"
+[transcription]
+provider = "mlx"
+mlx_model = "mlx-community/whisper-large-v3-turbo"
+groq_model = "whisper-large-v3"
 
 [enhancement]
 mode = "clean"
+provider = "ollama"
+model = ""
 
 [output]
 auto_paste = true
+auto_clipboard = true
 save_history = true
 
 [ui]
-notify_on_result = true
+notify_on_result = false

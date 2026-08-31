@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# install.sh — Install/uninstall the LaunchAgent that starts Mac Flow at login.
+# install.sh — Install/uninstall the LaunchAgent that starts MacFlow at login.
 #
 # Usage:
 #   bash install.sh install      # enable autostart
 #   bash install.sh uninstall    # disable autostart
 #
-# Mac Flow itself runs fine with `python main.py` — this script only wires up
+# MacFlow itself runs fine with `python main.py` — this script only wires up
 # the "launch on login" behaviour via a LaunchAgent plist.
 
 set -euo pipefail
@@ -63,7 +63,7 @@ EOF
         launchctl unload "$PLIST_PATH" 2>/dev/null || true
         launchctl load "$PLIST_PATH"
         echo "Installed LaunchAgent at $PLIST_PATH"
-        echo "Mac Flow will start automatically the next time you log in."
+        echo "MacFlow will start automatically the next time you log in."
         echo "Logs: $SCRIPT_DIR/mac_flow.log"
         ;;
 

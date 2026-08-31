@@ -10,9 +10,10 @@ since it contains the user's personal dictation history.
 
 import sqlite3
 from datetime import datetime
-from pathlib import Path
 
-DB_PATH = Path(__file__).parent.parent / "history.db"
+import paths
+
+DB_PATH = paths.data_dir() / "history.db"
 
 
 def _ensure_init():

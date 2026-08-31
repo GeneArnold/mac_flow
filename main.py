@@ -9,8 +9,13 @@ Usage:
 import argparse
 import sys
 
+import paths
+
 
 def main() -> None:
+    # When running inside a .app bundle, copy default config to
+    # ~/Library/Application Support/MacFlow/ on first launch.
+    paths.ensure_defaults()
     parser = argparse.ArgumentParser(
         description="mac_flow — voice dictation for macOS"
     )

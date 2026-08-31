@@ -11,7 +11,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_PYTHON="$SCRIPT_DIR/venv/bin/python"
+APP="/Applications/MacFlow.app"
 PLIST_PATH="$HOME/Library/LaunchAgents/com.genearnold.mac_flow.plist"
 LABEL="com.genearnold.mac_flow"
 
@@ -19,9 +19,9 @@ cmd="${1:-install}"
 
 case "$cmd" in
     install)
-        if [ ! -f "$VENV_PYTHON" ]; then
-            echo "ERROR: venv not found at $VENV_PYTHON"
-            echo "Run: python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt"
+        if [ ! -d "$APP" ]; then
+            echo "ERROR: $APP not found."
+            echo "Build and install it first: bash build_app.sh"
             exit 1
         fi
 
@@ -35,14 +35,16 @@ case "$cmd" in
     <key>Label</key>
     <string>$LABEL</string>
 
+    <!-- Launch the .app bundle via LaunchServices rather than running the venv
+         Python directly. macOS attributes Accessibility and Input Monitoring
+         grants to the bundle; a bare python process is a different identity and
+         would need its own grants, which is not obvious and fails silently. -->
     <key>ProgramArguments</key>
     <array>
-        <string>$VENV_PYTHON</string>
-        <string>$SCRIPT_DIR/main.py</string>
+        <string>/usr/bin/open</string>
+        <string>-a</string>
+        <string>$APP</string>
     </array>
-
-    <key>WorkingDirectory</key>
-    <string>$SCRIPT_DIR</string>
 
     <key>RunAtLoad</key>
     <true/>

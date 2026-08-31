@@ -117,7 +117,7 @@ def _load_env() -> None:
     """
     if not ENV_PATH.exists():
         return
-    for line in ENV_PATH.read_text().splitlines():
+    for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -166,7 +166,7 @@ def save(cfg: dict) -> None:
                 lines.append(f"{k} = [{items}]")
             else:
                 lines.append(f"{k} = {v}")
-    CONFIG_PATH.write_text("\n".join(lines).lstrip() + "\n")
+    CONFIG_PATH.write_text("\n".join(lines).lstrip() + "\n", encoding="utf-8")
 
 
 def set_value(section: str, key: str, value: Any) -> None:
@@ -186,7 +186,7 @@ def set_api_key(env_name: str, value: str) -> None:
 
 def _save_env_key(env_key: str, value: str) -> None:
     """Write or update a single KEY=value line in the .env file."""
-    lines = ENV_PATH.read_text().splitlines() if ENV_PATH.exists() else []
+    lines = ENV_PATH.read_text(encoding="utf-8").splitlines() if ENV_PATH.exists() else []
     found = False
     for i, line in enumerate(lines):
         if line.startswith(f"{env_key}=") or line.startswith(f"{env_key} ="):
@@ -195,4 +195,4 @@ def _save_env_key(env_key: str, value: str) -> None:
             break
     if not found:
         lines.append(f'{env_key}="{value}"')
-    ENV_PATH.write_text("\n".join(lines) + "\n")
+    ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")

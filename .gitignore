@@ -14,3 +14,8 @@ history.db-journal
 .idea/
 # Claude Code session files
 .claude/
+# py2app build artefacts
+build/
+dist/
+# runtime log
+mac_flow.log

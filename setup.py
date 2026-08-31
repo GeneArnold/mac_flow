@@ -7,7 +7,31 @@ Usage:
 The resulting app lands in dist/MacFlow.app.
 """
 
+import sys
+
 from setuptools import setup
+
+# py2app's modulegraph walks imports via the AST and blows the default 1000-frame
+# limit on deeply-nested packages. Harmless to raise; it only affects the build.
+sys.setrecursionlimit(10000)
+
+
+def _portaudio_dylib() -> str:
+    """Absolute path to libportaudio.dylib inside the installed sounddevice.
+
+    Resolved from the imported package rather than hardcoded, because the path
+    embeds the interpreter version (venv/lib/pythonX.Y/...). Hardcoding it
+    silently breaks the build on any other Python — the bundle then fails at
+    launch with "OSError: PortAudio library not found".
+    """
+    import _sounddevice_data
+    from pathlib import Path
+
+    dylib = (Path(_sounddevice_data.__file__).parent
+             / "portaudio-binaries" / "libportaudio.dylib")
+    if not dylib.exists():
+        raise SystemExit(f"libportaudio.dylib not found at {dylib}")
+    return str(dylib)
 
 APP = ["main.py"]
 DATA_FILES = [
@@ -62,10 +86,7 @@ OPTIONS = {
         # out of packages deliberately so the build doesn't pull it in broken.
     ],
     # sounddevice bundles libportaudio.dylib — it can't live inside a zip
-    "frameworks": [
-        "venv/lib/python3.11/site-packages/_sounddevice_data/"
-        "portaudio-binaries/libportaudio.dylib",
-    ],
+    "frameworks": [_portaudio_dylib()],
     "includes": [
         "paths",
         "config",
@@ -81,6 +102,28 @@ OPTIONS = {
         "db.history",
         "ui",
         "ui.app",
+    ],
+    # The local-transcription stack (mlx-whisper and its torch/numba/scipy
+    # dependency tree) is deliberately kept out of the bundle. `import
+    # mlx_whisper` in core/transcriber.py is lazy, inside the transcribe call,
+    # so a Groq-configured bundle never touches it. Without these excludes
+    # modulegraph tries to walk all of torch and dies with RecursionError —
+    # and even when it survives, it inflates the bundle by well over a GB.
+    # A bundled app must therefore use transcription.provider = "groq".
+    "excludes": [
+        "mlx",
+        "mlx_whisper",
+        "torch",
+        "sympy",
+        "numba",
+        "llvmlite",
+        "scipy",
+        "networkx",
+        "tiktoken",
+        "huggingface_hub",
+        "transformers",
+        "setuptools",
+        "pip",
     ],
     "resources": [
         "mac_flow.toml",

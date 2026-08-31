@@ -66,7 +66,9 @@ class MacInjector(TextInjector):
             CGEventCreateKeyboardEvent,
             CGEventPost,
             CGEventSetFlags,
+            CGEventSourceCreate,
             kCGEventFlagMaskCommand,
+            kCGEventSourceStateHIDSystemState,
             kCGHIDEventTap,
         )
 
@@ -78,11 +80,24 @@ class MacInjector(TextInjector):
         self._kCGEventFlagMaskCommand = kCGEventFlagMaskCommand
         self._kCGHIDEventTap = kCGHIDEventTap
 
+        # Events posted with a NULL source are unreliable — some applications
+        # ignore them outright. A real HID-state source makes the synthetic
+        # keystroke look like it came from the keyboard.
+        self._event_source = CGEventSourceCreate(kCGEventSourceStateHIDSystemState)
+
     # -- public API -------------------------------------------------------
 
-    def inject(self, text: str) -> bool:
+    def inject(self, text: str, restore_clipboard: bool = True) -> bool:
         """Paste text at the cursor via the clipboard + ⌘V.
-        Returns True on success; False if we couldn't simulate the keystroke.
+
+        Returns True if the keystroke was posted without error. Note this is
+        NOT proof the paste landed: CGEventPost returns nothing and does not
+        raise when the event is discarded, so a missing Accessibility grant
+        looks identical to success from here.
+
+        When *restore_clipboard* is False the transcript is deliberately left
+        on the clipboard instead of the previous contents being put back, so
+        the user can paste manually if the synthetic keystroke was dropped.
         """
         if not text:
             return True
@@ -105,7 +120,7 @@ class MacInjector(TextInjector):
 
         # Restore the previous clipboard after the paste has had time to land.
         # Runs on a daemon thread so we don't block the caller.
-        if prior is not None:
+        if prior is not None and restore_clipboard:
             threading.Thread(
                 target=self._restore_clipboard_later,
                 args=(prior,),
@@ -130,13 +145,20 @@ class MacInjector(TextInjector):
         """Post a synthetic ⌘V keystroke via CGEvent.
         Virtual keycode 9 is 'v' on Mac. Flags set to Command.
         """
+        src = self._event_source  # may be None if creation failed; still usable
+
         # Key down
-        down = self._CGEventCreateKeyboardEvent(None, 9, True)
+        down = self._CGEventCreateKeyboardEvent(src, 9, True)
         self._CGEventSetFlags(down, self._kCGEventFlagMaskCommand)
         self._CGEventPost(self._kCGHIDEventTap, down)
 
+        # Give the receiving app a moment to process the key-down before the
+        # key-up arrives. Posting both in the same instant is a common reason a
+        # synthetic shortcut is dropped.
+        time.sleep(0.01)
+
         # Key up
-        up = self._CGEventCreateKeyboardEvent(None, 9, False)
+        up = self._CGEventCreateKeyboardEvent(src, 9, False)
         self._CGEventSetFlags(up, self._kCGEventFlagMaskCommand)
         self._CGEventPost(self._kCGHIDEventTap, up)
 
@@ -158,6 +180,7 @@ class MacHotkeyListener(HotkeyListener):
         # Set of canonical pynput Key objects that must all be held simultaneously
         self._required_mods = {_MOD_MAP[m] for m in modifiers if m in _MOD_MAP}
         self._key = self._parse_key(key)
+        self._key_vk = self._trigger_vk(self._key)
         self._held_mods: set = set()
         self._hotkey_active = False
         self._listener = None
@@ -173,6 +196,59 @@ class MacHotkeyListener(HotkeyListener):
             return getattr(keyboard.Key, key)
         except AttributeError:
             return keyboard.KeyCode.from_char(key)
+
+    @staticmethod
+    def _trigger_vk(key):
+        """macOS virtual keycode for the trigger key, or None if unknown.
+
+        Named keys (Key.space -> 49) carry a vk on their .value; a KeyCode
+        built from a plain character does not, and returns None. Suppression
+        is skipped in that case rather than guessing.
+        """
+        vk = getattr(key, "vk", None)
+        if vk is None:
+            vk = getattr(getattr(key, "value", None), "vk", None)
+        return vk
+
+    def _darwin_intercept(self, event_type, event):
+        """Stop the trigger key from reaching the focused application.
+
+        pynput listens passively by default, so the hotkey is delivered to
+        whatever has focus as well as to us — holding Option+Shift+Space types
+        a space into the document, and key-repeat turns it into a run of them.
+        This is the "hotkey passthrough" limitation noted in the README.
+
+        darwin_intercept is pynput's macOS hook for selective suppression:
+        return the event to pass it through, or None to drop it system-wide.
+        pynput calls this *after* dispatching to on_press/on_release (see
+        _util/darwin.py: _handle_message runs first), so suppressing here does
+        not stop the hotkey from firing.
+
+        Only the configured trigger key is dropped, and only while every
+        required modifier is held, so ordinary typing is untouched. The
+        _hotkey_active check keeps the matching key-up suppressed too, since
+        modifiers are often released a few milliseconds before the key.
+        """
+        if self._key_vk is None:
+            return event
+
+        from Quartz import (
+            CGEventGetIntegerValueField,
+            kCGEventKeyDown,
+            kCGEventKeyUp,
+            kCGKeyboardEventKeycode,
+        )
+
+        if event_type not in (kCGEventKeyDown, kCGEventKeyUp):
+            return event
+        if CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode) != self._key_vk:
+            return event
+
+        with self._lock:
+            combo_held = self._held_mods == self._required_mods
+        if combo_held or self._hotkey_active:
+            return None
+        return event
 
     def _normalize_mod(self, key):
         """Map Key.ctrl_l / Key.ctrl_r → Key.ctrl (and similar for alt/shift/cmd)."""
@@ -226,6 +302,12 @@ class MacHotkeyListener(HotkeyListener):
     def start(self, on_press: Callable, on_release: Callable) -> None:
         self._on_press = on_press
         self._on_release = on_release
+        # NOTE: deliberately a passive (listen-only) tap. Passing
+        # darwin_intercept here makes pynput create an ACTIVE tap
+        # (kCGEventTapOptionDefault), which can suppress events — and if this
+        # process stalls or dies while holding one, system-wide keyboard input
+        # can be lost until reboot. Not worth it: the trigger is a modifier
+        # key, which generates no character, so there is nothing to suppress.
         self._listener = keyboard.Listener(
             on_press=self._on_key_press,
             on_release=self._on_key_release,

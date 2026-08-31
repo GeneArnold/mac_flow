@@ -15,7 +15,7 @@ class TextInjector(ABC):
     """Types text into the currently focused window and/or sets the clipboard."""
 
     @abstractmethod
-    def inject(self, text: str) -> bool:
+    def inject(self, text: str, restore_clipboard: bool = True) -> bool:
         """Paste text into the active window. Returns True on success."""
 
     @abstractmethod

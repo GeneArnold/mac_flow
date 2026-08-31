@@ -103,17 +103,48 @@ Both pipeline stages are provider-switchable via `mac_flow.toml`, so the app can
 - `_DEFAULTS` is the source of truth for every key. Add new settings there first — on-disk TOMLs merge on top, so missing keys silently get the default.
 - API keys (`GROQ_API_KEY`, `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY`) live exclusively in `.env` (gitignored), never in TOML. `config.set_api_key(env_name, value)` routes to `_save_env_key()`. `load()` surfaces them as `cfg["keys"][ENV_NAME]`.
 - `config.load()` re-reads from disk every call. After any settings change, call `engine.reload()` to rebuild all workers.
+- **The live hotkey on Gene's M5 Air is Right Option held alone** (`modifiers = []`, `key = "alt_r"`). A modifier key emits no character, so it cannot leak into the focused document — which any Space-based combo always does, because pynput listens passively and the keystroke still reaches the front app. This is the same approach Wispr Flow takes with the Fn key (pynput cannot see Fn on macOS, so Right Option is the closest equivalent). Trade-off: Right Option is also the special-character modifier, so use Left Option for `´`/`ø`/etc.
 - In-code default hotkey is **Option+Shift+Space** (`_DEFAULTS["hotkey"] = {"modifiers": ["alt", "shift"], "key": "space"}`). The user's live `mac_flow.toml` currently matches. This combo survived the Session-4 collision cascade (Ctrl+Space → Sublime/input-source, Option+Space → Raycast, Ctrl+Shift+Space → terminal focus-steal, Ctrl+Shift+D → character-key case-match bug in the listener). When changing defaults, remember the on-disk TOML wins, so bumping this only affects fresh installs.
 
 ## History DB
 
 SQLite at `history.db` in `paths.data_dir()`. `_ensure_init()` runs at import time so the UI can read history before `Engine.start()` is called. The History submenu in the menubar is click-to-copy: every entry, when clicked, copies its text to the clipboard (via `MacInjector.copy_to_clipboard`).
 
-## TCC grants and rebuilds
+## TCC grants and rebuilds — SOLVED, use `build_app.sh`
 
-macOS keys Accessibility + Input Monitoring grants to `(bundle path, adhoc codesign hash)`. Every `py2app` rebuild changes the hash, so the freshly-copied `.app` looks like a different program to the OS and keystrokes stop reaching the hotkey listener silently.
+macOS pins Accessibility + Input Monitoring grants to the app's **designated requirement**. Under ad-hoc signing that requirement is the code hash, so every `py2app` rebuild looked like a different program and silently voided the grants — the checkbox stays ticked while the grant does nothing, and the only symptom is that the app stops working with no error.
 
-After every rebuild the user must: (1) remove the old "MacFlow" entry from both privacy panes, (2) relaunch `/Applications/MacFlow.app`, (3) accept the prompt on first hotkey press, (4) quit and relaunch. The right permanent fix is a Developer ID signature; out of scope for v0.
+**This is fixed.** `packaging/make_signing_cert.sh` creates a self-signed code-signing certificate; `build_app.sh` builds, installs and signs with it. The requirement then reads:
+
+```
+designated => identifier "com.genearnold.macflow" and certificate leaf = H"548b4dc0…"
+```
+
+which is stable across rebuilds. **Always build with `build_app.sh`** — a bare `python setup.py py2app` + `cp` reverts to ad-hoc signing and reintroduces the whole problem.
+
+A Developer ID is still needed for distributing to other people; this only helps locally.
+
+### Accessibility never prompts
+
+Microphone and Input Monitoring show a system prompt on first use. **Accessibility does not.** `CGEventPost` fails silently when untrusted — no dialog, no error, no return code — so the app cannot detect the denial or ask for permission. It must be added by hand via **Privacy & Security → Accessibility → +** → `/Applications/MacFlow.app`.
+
+This single fact accounted for hours of misdiagnosis: recording and transcription worked, history filled up, `injected` was logged as `1`, and nothing pasted. Consider calling `AXIsProcessTrustedWithOptions({kAXTrustedCheckOptionPrompt: True})` at startup so the app asks instead of failing mutely.
+
+### Diagnosing permission problems
+
+The system log is authoritative — guessing from the UI is not:
+
+```bash
+log show --last 10m --predicate 'subsystem == "com.apple.TCC"' | grep -i macflow
+```
+
+`Failed to match existing code requirement` means a stale grant from an older signature. Clear it properly (removing the row in System Settings is not always enough):
+
+```bash
+tccutil reset Accessibility com.genearnold.macflow
+tccutil reset ListenEvent   com.genearnold.macflow
+tccutil reset Microphone    com.genearnold.macflow
+```
 
 ## Known open items (see NOTES.md)
 

@@ -19,3 +19,6 @@ build/
 dist/
 # runtime log
 mac_flow.log
+# Live config — machine-specific (device index, hotkey, providers).
+# The tracked template is mac_flow.toml.example; see paths.ensure_defaults().
+mac_flow.toml

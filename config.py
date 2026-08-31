@@ -62,7 +62,13 @@ ENHANCE_PROVIDERS = {
     "groq": {
         "base_url": "https://api.groq.com/openai/v1",
         "api_key_env": "GROQ_API_KEY",
-        "model": "llama-3.3-70b-versatile",
+        # Groq retired the llama-3.3-70b-versatile model that used to be the
+        # default here. Because mac_flow.toml ships `model = ""`, meaning "use
+        # this registry default", every Groq user silently got a model that no
+        # longer exists and every enhancement failed. Verified present on a
+        # free-tier account 2026-08-31; gpt-oss-20b was the fastest candidate
+        # that fully stripped filler words (0.37s vs 0.60s for the 120b).
+        "model": "openai/gpt-oss-20b",
     },
 }
 

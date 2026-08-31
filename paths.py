@@ -65,18 +65,21 @@ def pending_dir() -> Path:
 
 
 def ensure_defaults() -> None:
-    """Copy default config to Application Support if it doesn't exist yet.
-    Only relevant in bundled mode — on first launch after install.
+    """Create the user's config files from the shipped templates if absent.
+
+    Runs in both modes. mac_flow.toml is deliberately NOT tracked in git — it
+    holds machine-specific settings (device_index, hotkey, provider choices),
+    and syncing it between machines breaks whichever one has a different audio
+    device. The tracked file is mac_flow.toml.example; the live config is
+    generated from it on first run, exactly as .env is generated from
+    .env.example.
     """
-    if not is_bundled():
-        return
+    dst = data_dir()
+    resources = _bundle_resources() if is_bundled() else _source_root()
 
-    dst = _app_support()
-    resources = _bundle_resources()
-
-    # Copy mac_flow.toml if the user doesn't have one yet
+    # Live config from the template, if the user has none yet.
     toml_dst = dst / "mac_flow.toml"
-    toml_src = resources / "mac_flow.toml"
+    toml_src = resources / "mac_flow.toml.example"
     if not toml_dst.exists() and toml_src.exists():
         shutil.copy2(toml_src, toml_dst)
 

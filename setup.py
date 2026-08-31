@@ -126,7 +126,10 @@ OPTIONS = {
         "pip",
     ],
     "resources": [
-        "mac_flow.toml",
+        # The template, not the live config — mac_flow.toml is untracked and
+        # machine-specific. paths.ensure_defaults() copies this into
+        # Application Support on first launch.
+        "mac_flow.toml.example",
         ".env.example",
     ],
 }

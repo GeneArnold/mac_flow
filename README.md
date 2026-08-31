@@ -166,7 +166,9 @@ Almost always a missing permission. Open **System Settings → Privacy & Securit
 - **Accessibility** — same.
 - **Input Monitoring** — same.
 
-If MacFlow is missing from any of those panes, launch the app and press `Option+Shift+Space` once inside any text field — macOS should prompt you. If it still doesn't appear, try toggling the app off and back on in each pane.
+If MacFlow is missing from any of those panes, **add it manually** with the `+` button (press `⌘⇧G` and enter `/Applications/MacFlow.app`).
+
+**Do not wait for a prompt for Accessibility — one will never come.** Microphone and Input Monitoring prompt on first use, but Accessibility does not: the API MacFlow uses to paste (`CGEventPost`) fails *silently* when untrusted. No dialog, no error, no failure code. The app cannot tell that it was denied, so it cannot ask.
 
 After any change, **quit MacFlow and launch it again**. Permissions only take effect at process start.
 
@@ -187,7 +189,17 @@ Either your network is down, or your Groq API key is invalid. Click the mic → 
 
 ### "I never got prompted for permissions"
 
-macOS only prompts on the very first attempt. If you'd already declined, the prompt never returns. Remove the MacFlow entry from each pane with the `−` button, then launch the app and press `Option+Shift+Space` — the prompts should come back.
+**Accessibility never prompts at all** — see above. Add it by hand with `+`.
+
+Microphone and Input Monitoring do prompt, but only on the first attempt; if you declined once, the prompt never returns. Clearing the decision properly requires `tccutil`, because removing the row in System Settings does not always reset the underlying record:
+
+```bash
+tccutil reset Accessibility com.genearnold.macflow
+tccutil reset ListenEvent   com.genearnold.macflow   # Input Monitoring
+tccutil reset Microphone    com.genearnold.macflow
+```
+
+Then relaunch MacFlow, add it to **Accessibility** manually, and use the hotkey once to trigger the other two prompts.
 
 ### "I can see the transcript in History, but nothing pasted into my cursor"
 
@@ -276,15 +288,20 @@ source venv/bin/activate
 pip install -r requirements.txt
 pip install py2app              # only needed for building the .app
 
-# 3. Build the .app and install to /Applications
-rm -rf build dist
-python setup.py py2app
-rm -rf /Applications/MacFlow.app
-cp -R dist/MacFlow.app /Applications/MacFlow.app
+# 3. One-time: create the code-signing certificate.
+#    Skip this and every rebuild will silently wipe your permissions —
+#    see "Code signing" below for why.
+bash packaging/make_signing_cert.sh
 
-# 4. Launch it
+# 4. Build, install to /Applications, and sign
+bash build_app.sh
+
+# 5. Launch it
 open /Applications/MacFlow.app
 ```
+
+`build_app.sh` replaces the manual `py2app` + `cp` dance and adds the signing step. It
+refuses to run if the venv isn't active or the certificate is missing.
 
 Then follow **Steps 3 through 6** of the install instructions above to set up your API key and permissions.
 
@@ -303,14 +320,40 @@ In source mode, config and history live inside the repo directory (`./mac_flow.t
 python main.py --list-mics      # list available input devices with their indices
 ```
 
-### Rebuild gotcha
+### Code signing — why `build_app.sh` exists
 
-Every time you rebuild the `.app`, macOS sees it as a different program (the ad-hoc code signature hash changes) and silently invalidates your previous Accessibility and Input Monitoring grants. After each rebuild:
+macOS pins privacy grants to an app's **designated requirement**. With ad-hoc signing that requirement is the *code hash*, which changes on every single build. So each rebuild looks like an entirely different program, and your Accessibility and Input Monitoring grants are silently voided — the checkbox still appears ticked while the grant does nothing. The only visible symptom is that the app stops working, with no error anywhere. In the system log it looks like this:
 
-1. Quit MacFlow (`pkill -9 -f "MacFlow.app/Contents/MacOS"` if it won't quit).
-2. Open **System Settings → Privacy & Security → Accessibility**. Remove any existing MacFlow entry with the `−` button.
-3. Do the same under **Input Monitoring**.
-4. Relaunch `/Applications/MacFlow.app`. macOS will prompt fresh on the next hotkey press.
+```
+tccd: Failed to match existing code requirement for subject
+      com.genearnold.macflow and service kTCCServiceAccessibility
+```
+
+`packaging/make_signing_cert.sh` fixes this permanently by creating a self-signed
+code-signing certificate. The designated requirement then references the *certificate*
+rather than the code hash:
+
+```
+designated => identifier "com.genearnold.macflow" and certificate leaf = H"548b4dc0…"
+```
+
+That value is identical across rebuilds, so **permissions survive**. `build_app.sh` signs
+with it automatically and prints the requirement after every build so you can confirm it
+has not changed.
+
+This is a local-machine fix only. Distributing the app to other people still needs a real
+Developer ID and notarization.
+
+If you ever switch signing identity (or move from ad-hoc), the requirement changes once,
+so reset the grants that one time:
+
+```bash
+tccutil reset Accessibility com.genearnold.macflow
+tccutil reset ListenEvent   com.genearnold.macflow
+tccutil reset Microphone    com.genearnold.macflow
+```
+
+then re-grant. After that, rebuild freely.
 
 ### Stale bytecode
 

@@ -337,7 +337,13 @@ class Engine:
         # --- Output ---
         injected = False
         if self._cfg["output"]["auto_paste"]:
-            injected = self._injector.inject(final)
+            # When auto_clipboard is on, don't restore the previous clipboard
+            # afterwards. inject() cannot tell whether the synthetic paste
+            # actually landed, so leaving the transcript on the clipboard means
+            # a dropped keystroke costs the user one manual Cmd+V instead of
+            # losing the text entirely.
+            keep = self._cfg["output"]["auto_clipboard"]
+            injected = self._injector.inject(final, restore_clipboard=not keep)
             if not injected and self._cfg["output"]["auto_clipboard"]:
                 # Paste failed (likely missing Accessibility permission) —
                 # clipboard is the fallback so text isn't lost.

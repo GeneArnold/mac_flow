@@ -1,0 +1,65 @@
+# MacFlow configuration template.
+#
+# Copy to mac_flow.toml (done automatically on first run) and edit.
+# mac_flow.toml itself is gitignored: it holds machine-specific values such as
+# the audio device index, so sharing it between machines breaks whichever one
+# has different hardware.
+#
+# API keys never live here — they go in .env. See .env.example.
+
+[app]
+version = "0.1.0"
+autostart = false
+
+[audio]
+# -1 = system default. Prefer this: an explicit index is machine-specific and
+# a stale one crashes PortAudio with "Error querying device N".
+# Run `python main.py --list-mics` to see indices for this machine.
+device_index = -1
+sample_rate = 16000
+channels = 1
+
+[hotkey]
+# Held down to record; released to transcribe.
+#
+# Prefer a modifier-only trigger. pynput listens passively on macOS, so the
+# trigger key is ALSO delivered to whatever has focus — with a printable key
+# such as space, every dictation types a character into your document. A
+# modifier emits nothing, so there is nothing to leak.
+#
+#   modifiers = []          key = "alt_r"    # hold Right Option (recommended)
+#   modifiers = []          key = "cmd_r"    # hold Right Command
+#   modifiers = ["alt", "shift"]  key = "space"   # legacy; leaks a space
+#
+# Note Right Option is also the special-character modifier (Option+e -> acute),
+# so use Left Option for those.
+modifiers = []
+key = "alt_r"
+
+[transcription]
+# "mlx"  = local Whisper via mlx-whisper. Offline, no key, downloads ~1.6GB on
+#          first use. NOT available in a built .app — the mlx/torch tree is
+#          excluded from the bundle (see setup.py).
+# "groq" = Groq Whisper API. Requires GROQ_API_KEY in .env.
+provider = "groq"
+mlx_model = "mlx-community/whisper-large-v3-turbo"
+groq_model = "whisper-large-v3"
+
+[enhancement]
+# mode: "raw" (no LLM call) | "clean" (fix grammar, strip fillers) | "rewrite"
+mode = "clean"
+# provider: "ollama" (local) | "groq" | "deepseek" | "openrouter"
+provider = "groq"
+# "" means "use the provider's default from config.ENHANCE_PROVIDERS".
+# Naming a model explicitly is safer — a retired default fails on every call.
+model = "openai/gpt-oss-20b"
+
+[output]
+auto_paste = true
+# Keep the transcript on the clipboard as well. Recommended: a synthetic paste
+# can be dropped silently by macOS, and this is what makes it recoverable.
+auto_clipboard = true
+save_history = true
+
+[ui]
+notify_on_result = false
